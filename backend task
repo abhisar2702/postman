@@ -132,3 +132,4 @@ func saveReportToFile(report string) {
 		fmt.Printf("Error writing to report file: %v\n", err)
 	}
 }
+go run main.go sample1.txt sample2.txt sample3.txt
