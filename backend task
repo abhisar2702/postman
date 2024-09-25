@@ -1,0 +1,134 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+)
+
+var commonWords = map[string]struct{}{
+	"the": {}, "a": {}, "an": {}, "is": {}, "to": {}, "and": {},
+	"or": {}, "in": {}, "at": {}, "of": {}, "for": {}, "that": {},
+}
+
+var wordRegex = regexp.MustCompile(`[^\w'-]+`) // Matches non-word characters
+
+type WordFrequency struct {
+	Word  string
+	Count int
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("Please provide at least one text file.")
+		return
+	}
+
+	var waitGroup sync.WaitGroup
+	wordCountMap := sync.Map{}
+
+	for _, filePath := range os.Args[1:] {
+		waitGroup.Add(1)
+		go func(path string) {
+			defer waitGroup.Done()
+			processFile(path, &wordCountMap)
+		}(filePath)
+	}
+
+	waitGroup.Wait()
+	report := createReport(&wordCountMap)
+	saveReportToFile(report)
+	fmt.Println(report)
+}
+
+func processFile(filePath string, wordCountMap *sync.Map) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		fmt.Printf("Error opening file %s: %v\n", filePath, err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		words := extractWords(line)
+		for _, word := range words {
+			if _, found := commonWords[word]; !found {
+				incrementWordCount(word, wordCountMap)
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("Error reading file %s: %v\n", filePath, err)
+	}
+}
+
+func extractWords(line string) []string {
+	line = strings.ToLower(line)
+	return wordRegex.Split(line, -1)
+}
+
+func incrementWordCount(word string, wordCountMap *sync.Map) {
+	if count, exists := wordCountMap.Load(word); exists {
+		wordCountMap.Store(word, count.(int)+1)
+	} else {
+		wordCountMap.Store(word, 1)
+	}
+}
+
+func createReport(wordCountMap *sync.Map) string {
+	var wordFrequencies []WordFrequency
+
+	wordCountMap.Range(func(key, value interface{}) bool {
+		wordFrequencies = append(wordFrequencies, WordFrequency{Word: key.(string), Count: value.(int)})
+		return true
+	})
+
+	// Sort by count descending
+	sort.Slice(wordFrequencies, func(i, j int) bool {
+		return wordFrequencies[i].Count > wordFrequencies[j].Count
+	})
+
+	var reportBuilder strings.Builder
+	reportBuilder.WriteString("Word Frequency Analysis Report\n")
+	reportBuilder.WriteString("------------------------------\n")
+	for i, wf := range wordFrequencies {
+		if i >= 15 {
+			break
+		}
+		reportBuilder.WriteString(fmt.Sprintf("%d. %s: %d\n", i+1, wf.Word, wf.Count))
+	}
+
+	reportBuilder.WriteString(fmt.Sprintf("\nTotal unique words: %d\n", len(wordFrequencies)))
+	reportBuilder.WriteString(fmt.Sprintf("Total word count: %d\n", totalWordCount(wordFrequencies)))
+	reportBuilder.WriteString(fmt.Sprintf("Files processed: %d\n", len(os.Args)-1))
+
+	return reportBuilder.String()
+}
+
+func totalWordCount(wordFrequencies []WordFrequency) int {
+	total := 0
+	for _, wf := range wordFrequencies {
+		total += wf.Count
+	}
+	return total
+}
+
+func saveReportToFile(report string) {
+	file, err := os.Create("analysis_report.txt")
+	if err != nil {
+		fmt.Printf("Error creating report file: %v\n", err)
+		return
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(report); err != nil {
+		fmt.Printf("Error writing to report file: %v\n", err)
+	}
+}
